@@ -93,7 +93,8 @@ static struct miscdevice snap_control_device = {
 static int major;
 static struct snap_device *dev;
 
-static void get_setup_params(const struct setup_params __user *in, char **bdev_path, char **cow_path, uint64_t *cow_size) {
+static void get_setup_params(const struct setup_params __user *in, char **bdev_path, 
+			     char **cow_path, uint64_t *cow_size) {
 	int ret;
 	struct setup_params params;
 	
@@ -261,13 +262,14 @@ static int snap_read_bio_get_mode(const struct snap_device *dev, struct bio *bio
 }
 
 static void snap_handle_read_bio(const struct snap_device *dev, struct bio *bio) {
+	char *data;
 	int mode, iter;
 	struct bio_vec *bvec;
 	void *orig_private = bio->bi_private;
 	bio_end_io_t *orig_end_io = bio->bi_end_io;
-	char *data;
-	uint64_t mappging, bytes_to_copy, block_off, bvec_off, bio_orig_sect = bio->bi_sector, cur_block, 
-		cur_sect, bio_orig_idx = bio->bi_idx, bio_orig_size = bio->bi_size;
+	uint64_t mappging, bytes_to_copy, block_off, bvec_off, cur_block, cur_sect, 
+		         bio_orig_idx = bio->bi_idx, bio_orig_sect = bio->bi_sector, 
+		                                       bio_orig_size = bio->bi_size;
 	
 	bio->bi_bdev = dev->sd_base_dev;
 	bio_set_op_attrs(bio, REQ_OP_READ, READ_SYNC);
@@ -285,12 +287,13 @@ static void snap_handle_read_bio(const struct snap_device *dev, struct bio *bio)
 			block_off = cur_sect * SECTOR_SIZE % COW_BLOCK_SIZE;
 			bvec_off = bvec->bv_offset;
 			while(bvec_off < bvec->bv_offset + bvec->bv_len) {
-				bytes_to_copy = min(bvec->bv_offset + bvec->bv_len - bvec_off, 
-										COW_BLOCK_SIZE - block_off);
+				bytes_to_copy = min(bvec->bv_offset + bvec->bv_len - bvec_off,
+						    COW_BLOCK_SIZE - block_off);
 				cow_read_mapping(dev->sd_cow, cur_block, &mappging);
 				if(mappging) 
-					kernel_read(dev->sd_cow->filp, mappging * COW_BLOCK_SIZE
-						  + block_off, data + bvec_off, bytes_to_copy);
+					kernel_read(dev->sd_cow->filp, mappging * 
+						    COW_BLOCK_SIZE + block_off, data + 
+						    bvec_off, bytes_to_copy);
 				cur_sect += bytes_to_copy / SECTOR_SIZE;
 				cur_block = cur_sect * SECTOR_SIZE / COW_BLOCK_SIZE;
 				block_off = cur_sect * SECTOR_SIZE % COW_BLOCK_SIZE;
@@ -317,11 +320,11 @@ static int snap_handle_write_bio(const struct snap_device *dev, struct bio *bio)
 		group = block / COW_SECTION_SIZE;
 		sect_pos = block % COW_SECTION_SIZE;
 		if(!dev->sd_cow->sects[group]) 
-			dev->sd_cow->sects[group] = (void*) __get_free_pages(GFP_KERNEL | __GFP_ZERO, 
-									     dev->sd_cow->log_sect_pages);
+			dev->sd_cow->sects[group] = (void*) __get_free_pages(GFP_KERNEL | 
+                                                     __GFP_ZERO, dev->sd_cow->log_sect_pages);
 		dev->sd_cow->sects[group][sect_pos] = dev->sd_cow->curr_pos;
 		kernel_write(dev->sd_cow->filp, kmap(bvec->bv_page), COW_BLOCK_SIZE, 
-							dev->sd_cow->curr_pos * COW_BLOCK_SIZE);
+			                          dev->sd_cow->curr_pos * COW_BLOCK_SIZE);
 		dev->sd_cow->curr_pos++;
 		kunmap(bvec->bv_page);
 	}
@@ -336,7 +339,8 @@ static int snap_mrf_thread(void *data) {
 	struct bio_queue *bq = &dev->sd_orig_bios;
 
 	while(!kthread_should_stop() || !bio_list_empty(&bq->bios)) {
-		wait_event_interruptible(bq->event, kthread_should_stop() || !bio_list_empty(&bq->bios));
+		wait_event_interruptible(bq->event, kthread_should_stop() || 
+					 !bio_list_empty(&bq->bios));
 		if(bio_list_empty(&bq->bios))
 			continue;
 		dev->sd_orig_mrf(bdev_get_queue(dev->sd_base_dev), bio_queue_dequeue(bq));
@@ -350,7 +354,8 @@ static int snap_cow_thread(void *data) {
 	
 	while(!kthread_should_stop() || !bio_list_empty(&bq->bios) || 
 	      atomic64_read(&dev->sd_submitted_cnt) != atomic64_read(&dev->sd_received_cnt)) {
-		wait_event_interruptible(bq->event, kthread_should_stop() || !bio_list_empty(&bq->bios));
+		wait_event_interruptible(bq->event, kthread_should_stop() || 
+					 !bio_list_empty(&bq->bios));
 		if(bio_list_empty(&bq->bios))
 			continue;
 		bio = bio_queue_dequeue(bq);
@@ -363,10 +368,11 @@ static int snap_cow_thread(void *data) {
 }
 
 static int bio_make_read_clone(struct tracing_params *tp, struct bio *orig_bio, sector_t sect, 
-			       unsigned int pages, struct bio **bio_out, unsigned int *bytes_added) {
+		       unsigned int pages, struct bio **bio_out, unsigned int *bytes_added) {
 	struct bio *new_bio;
 	struct page *pg;
-	unsigned int i, bytes, total = 0, actual_pages = pages > BIO_MAX_PAGES ? BIO_MAX_PAGES : pages;
+	unsigned int i, bytes, total = 0, actual_pages = pages > BIO_MAX_PAGES ? 
+		                                                        BIO_MAX_PAGES : pages;
 	
 	new_bio = bio_alloc(GFP_NOIO, actual_pages);
 	atomic_inc(&tp->refs);
@@ -402,9 +408,10 @@ static void tracing_mrf(struct request_queue *q, struct bio *bio) {
 			dev->sd_orig_mrf(bdev_get_queue(bio->bi_bdev), bio);
 			return;
 		}
-		start_sect = ROUND_DOWN(bio->bi_sector - dev->sd_sect_off, SECTORS_PER_BLOCK) + dev->sd_sect_off;
-		end_sect = ROUND_UP(bio->bi_sector + (bio->bi_size / SECTOR_SIZE) - dev->sd_sect_off, 
-				    SECTORS_PER_BLOCK) + dev->sd_sect_off;
+		start_sect = ROUND_DOWN(bio->bi_sector - dev->sd_sect_off, SECTORS_PER_BLOCK)
+			                                                   + dev->sd_sect_off;
+		end_sect = ROUND_UP(bio->bi_sector - dev->sd_sect_off + (bio->bi_size / 
+                                          SECTOR_SIZE), SECTORS_PER_BLOCK) + dev->sd_sect_off;
 		pages = (end_sect - start_sect) / SECTORS_PER_PAGE;
 		tp = kzalloc(1 * sizeof(struct tracing_params), GFP_NOIO);
 		tp->dev = dev;
@@ -462,7 +469,8 @@ static long ctrl_ioctl(struct file *filp, unsigned int cmd, unsigned long arg) {
 	dev->sd_cow->log_sect_pages = get_order(COW_SECTION_SIZE * 8);
 	dev->sd_cow->total_sects = NUM_SEGMENTS(SECTOR_TO_BLOCK(sd_size), 
 						dev->sd_cow->log_sect_pages + PAGE_SHIFT - 3);
-	dev->sd_cow->curr_pos = dev->sd_cow->total_sects * COW_SECTION_SIZE * 8 / COW_BLOCK_SIZE;
+	dev->sd_cow->curr_pos = dev->sd_cow->total_sects * COW_SECTION_SIZE * 8 / 
+		                                                               COW_BLOCK_SIZE;
 	dev->sd_cow->sects = kzalloc(dev->sd_cow->total_sects * sizeof(void*), GFP_KERNEL);
 	file_allocate(dev->sd_cow->filp, 0, cow_size * 1024 * 1024); 
 	dev->sd_queue = blk_alloc_queue(GFP_KERNEL); 
@@ -493,6 +501,7 @@ static long ctrl_ioctl(struct file *filp, unsigned int cmd, unsigned long arg) {
 
 static void agent_exit(void) {
 	unsigned long i;
+	struct file *cow_fp = dev->sd_cow->filp;
 
 	misc_deregister(&snap_control_device);
 	if(dev) {
@@ -505,16 +514,17 @@ static void agent_exit(void) {
 		blk_cleanup_queue(dev->sd_queue);
 		for(i = 0; i < dev->sd_cow->total_sects; i++)
 			if(dev->sd_cow->sects[i])
-				free_pages((unsigned long)dev->sd_cow->sects[i], dev->sd_cow->log_sect_pages);
+				free_pages((unsigned long)dev->sd_cow->sects[i], 
+					                         dev->sd_cow->log_sect_pages);
 		kfree(dev->sd_cow->sects);
 
 		{ 
-			struct inode *dir_inode = dev->sd_cow->filp->f_path.dentry->d_parent->d_inode;
-			struct dentry *file_dentry = dev->sd_cow->filp->f_path.dentry;
+			struct inode *dir_inode = cow_fp->f_path.dentry->d_parent->d_inode;
+			struct dentry *file_dentry = cow_fp->f_path.dentry;
 			dget(file_dentry);
 			igrab(dir_inode);
 			vfs_unlink(dir_inode, file_dentry, NULL);
-			filp_close(dev->sd_cow->filp, NULL);;
+			filp_close(cow_fp, NULL);;
 			iput(dir_inode);
 			dput(file_dentry);
 		}
@@ -535,4 +545,3 @@ static int __init agent_init(void) {
 module_init(agent_init);
 
 MODULE_LICENSE("GPL");
-
