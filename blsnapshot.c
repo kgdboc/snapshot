@@ -94,7 +94,7 @@ static int major;
 static struct snap_device *dev;
 
 static void get_setup_params(const struct setup_params __user *in, char **bdev_path, 
-			     char **cow_path, uint64_t *cow_size) {
+			                                char **cow_path, uint64_t *cow_size) {
 	int ret;
 	struct setup_params params;
 	
