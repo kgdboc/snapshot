@@ -38,7 +38,6 @@ struct bio_sector_map {
 
 struct tracing_params {
 	struct bio *orig_bio;
-	struct snap_device *dev;
 	atomic_t refs;
 	struct bio_sector_map bio_sects[MAX_CLONES_PER_BIO];
 };
@@ -146,7 +145,6 @@ static void file_allocate(struct file *f, uint64_t offset, uint64_t length) {
 	kfree(abs_path);
 }
 
-
 static void cow_read_mapping(struct cow_manager *cm, uint64_t pos, uint64_t *out) {
 	uint64_t sect_idx = pos;
 	unsigned long sect_pos = do_div(sect_idx, COW_SECTION_SIZE);
@@ -180,10 +178,9 @@ static struct bio *bio_queue_dequeue(struct bio_queue *bq) {
 	return bio;
 }
 
-
 static void tp_put(struct tracing_params *tp) {
 	if(atomic_dec_and_test(&tp->refs)) {
-		bio_queue_add(&tp->dev->sd_orig_bios, tp->orig_bio);
+		bio_queue_add(&dev->sd_orig_bios, tp->orig_bio);
 		kfree(tp);
 	}
 }
@@ -210,7 +207,6 @@ static int bio_needs_cow(struct bio *bio, struct inode *inode) {
 static void on_bio_read_complete(struct bio *bio, int err) {
 	unsigned short i;
 	struct tracing_params *tp = bio->bi_private;
-	struct snap_device *dev = tp->dev;
 
 	bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
 	for(i = 0; i < MAX_CLONES_PER_BIO && tp->bio_sects[i].bio != NULL; i++) {
@@ -232,7 +228,7 @@ static void on_bio_read_complete(struct bio *bio, int err) {
 }
 
 
-static int snap_read_bio_get_mode(const struct snap_device *dev, struct bio *bio, int *mode) {
+static int snap_read_bio_get_mode(struct bio *bio, int *mode) {
 	int start_mode = 0;
 	int iter;
 	struct bio_vec *bvec;
@@ -261,7 +257,7 @@ static int snap_read_bio_get_mode(const struct snap_device *dev, struct bio *bio
 	return 0;
 }
 
-static void snap_handle_read_bio(const struct snap_device *dev, struct bio *bio) {
+static void snap_handle_read_bio(struct bio *bio) {
 	char *data;
 	int mode, iter;
 	struct bio_vec *bvec;
@@ -273,7 +269,7 @@ static void snap_handle_read_bio(const struct snap_device *dev, struct bio *bio)
 	
 	bio->bi_bdev = dev->sd_base_dev;
 	bio_set_op_attrs(bio, REQ_OP_READ, READ_SYNC);
-	snap_read_bio_get_mode(dev, bio, &mode);
+	snap_read_bio_get_mode(bio, &mode);
 	if(mode != READ_MODE_COW_FILE)
 		submit_bio_wait(0, bio);
 	if(mode != READ_MODE_BASE_DEVICE) {
@@ -307,7 +303,7 @@ static void snap_handle_read_bio(const struct snap_device *dev, struct bio *bio)
 	bio_endio(bio, 0);
 }
 
-static int snap_handle_write_bio(const struct snap_device *dev, struct bio *bio) {
+static int snap_handle_write_bio(struct bio *bio) {
 	int iter, sect_pos, i;
 	struct bio_vec *bvec;
 	uint64_t block, group, mappging;
@@ -360,9 +356,9 @@ static int snap_cow_thread(void *data) {
 			continue;
 		bio = bio_queue_dequeue(bq);
 		if(bio_data_dir(bio)) 
-			snap_handle_write_bio(dev, bio);
+			snap_handle_write_bio(bio);
 		else
-			snap_handle_read_bio(dev, bio);
+			snap_handle_read_bio(bio);
 	}
 	return 0;
 }
@@ -414,7 +410,6 @@ static void tracing_mrf(struct request_queue *q, struct bio *bio) {
                                           SECTOR_SIZE), SECTORS_PER_BLOCK) + dev->sd_sect_off;
 		pages = (end_sect - start_sect) / SECTORS_PER_PAGE;
 		tp = kzalloc(1 * sizeof(struct tracing_params), GFP_NOIO);
-		tp->dev = dev;
 		tp->orig_bio = bio;
 		atomic_set(&tp->refs, 1);
 	
@@ -516,7 +511,6 @@ static void agent_exit(void) {
 				free_pages((unsigned long)dev->sd_cow->sects[i], 
 					                         dev->sd_cow->log_sect_pages);
 		kfree(dev->sd_cow->sects);
-
 		{ 
 			struct inode *dir_inode = cow_fp->f_path.dentry->d_parent->d_inode;
 			struct dentry *file_dentry = cow_fp->f_path.dentry;
@@ -527,7 +521,6 @@ static void agent_exit(void) {
 			iput(dir_inode);
 			dput(file_dentry);
 		}
-
 		kfree(dev->sd_cow);
 		blkdev_put(dev->sd_base_dev, FMODE_READ);
 	}
