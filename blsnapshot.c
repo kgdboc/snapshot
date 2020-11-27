@@ -227,7 +227,6 @@ static void on_bio_read_complete(struct bio *bio, int err) {
 	tp_put(tp);
 }
 
-
 static int snap_read_bio_get_mode(struct bio *bio, int *mode) {
 	int start_mode = 0;
 	int iter;
@@ -336,7 +335,7 @@ static int snap_mrf_thread(void *data) {
 
 	while(!kthread_should_stop() || !bio_list_empty(&bq->bios)) {
 		wait_event_interruptible(bq->event, kthread_should_stop() || 
-					 !bio_list_empty(&bq->bios));
+					                          !bio_list_empty(&bq->bios));
 		if(bio_list_empty(&bq->bios))
 			continue;
 		dev->sd_orig_mrf(bdev_get_queue(dev->sd_base_dev), bio_queue_dequeue(bq));
@@ -351,7 +350,7 @@ static int snap_cow_thread(void *data) {
 	while(!kthread_should_stop() || !bio_list_empty(&bq->bios) || 
 	      atomic64_read(&dev->sd_submitted_cnt) != atomic64_read(&dev->sd_received_cnt)) {
 		wait_event_interruptible(bq->event, kthread_should_stop() || 
-					 !bio_list_empty(&bq->bios));
+					                          !bio_list_empty(&bq->bios));
 		if(bio_list_empty(&bq->bios))
 			continue;
 		bio = bio_queue_dequeue(bq);
@@ -364,7 +363,7 @@ static int snap_cow_thread(void *data) {
 }
 
 static int bio_make_read_clone(struct tracing_params *tp, struct bio *orig_bio, sector_t sect, 
-		       unsigned int pages, struct bio **bio_out, unsigned int *bytes_added) {
+		        unsigned int pages, struct bio **bio_out, unsigned int *bytes_added) {
 	struct bio *new_bio;
 	struct page *pg;
 	unsigned int i, bytes, total = 0, actual_pages = pages > BIO_MAX_PAGES ? 
